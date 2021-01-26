@@ -1,3 +1,7 @@
+/*
+Copyright (c) 2021. Elex. All Rights Reserved.
+https://www.elex-project.com/
+ */
 package kr.pe.elex.mosquitto;
 
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +17,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.cert.CertificateException;
 
+/**
+ * Mosquitto MQTT Example
+ *
+ * @author Elex
+ */
 @Slf4j
 public class HelloMosquitto {
 	static final String BROKER_URI = "tcp://127.0.0.1:1883";
