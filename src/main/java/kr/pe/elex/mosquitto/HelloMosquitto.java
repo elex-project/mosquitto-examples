@@ -8,13 +8,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.*;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 
 /**
@@ -23,9 +23,11 @@ import java.security.cert.CertificateException;
  * @author Elex
  */
 @Slf4j
-public class HelloMosquitto {
+public final class HelloMosquitto {
 	static final String BROKER_URI = "tcp://127.0.0.1:1883";
 	static final String BROKER_URI_TLS = "ssl://127.0.0.1:8883";
+	static final String USER_NAME = "elex";
+	static final String PASSWORD = "test";
 
 	private MqttClient client;
 	private MemoryPersistence persistence = new MemoryPersistence();
@@ -39,8 +41,8 @@ public class HelloMosquitto {
 	public HelloMosquitto(String clientId) throws MqttException {
 		client = new MqttClient(BROKER_URI, clientId, persistence);
 		MqttConnectOptions connOpts = new MqttConnectOptions();
-		connOpts.setUserName("elex");
-		connOpts.setPassword("test".toCharArray());
+		connOpts.setUserName(USER_NAME);
+		connOpts.setPassword(PASSWORD.toCharArray());
 		connOpts.setAutomaticReconnect(true);
 		connOpts.setCleanSession(true);
 
@@ -57,8 +59,8 @@ public class HelloMosquitto {
 	public HelloMosquitto(String clientId, SSLSocketFactory socketFactory) throws MqttException {
 		client = new MqttClient(BROKER_URI_TLS, clientId, persistence); // 주소는 ssl로 시작하고, 포트는 8883을 사용합니다.
 		MqttConnectOptions connOpts = new MqttConnectOptions();
-		connOpts.setUserName("elex");
-		connOpts.setPassword("test".toCharArray());
+		connOpts.setUserName(USER_NAME);
+		connOpts.setPassword(PASSWORD.toCharArray());
 		connOpts.setAutomaticReconnect(true);
 		connOpts.setCleanSession(true);
 		connOpts.setSocketFactory(socketFactory);
@@ -67,39 +69,6 @@ public class HelloMosquitto {
 		client.connect(connOpts);
 	}
 
-	/**
-	 * SSL Context를 만든 다음, 소켓 팩토리를 가져옵니다.
-	 *
-	 * @return
-	 * @throws KeyStoreException
-	 * @throws CertificateException
-	 * @throws NoSuchAlgorithmException
-	 * @throws IOException
-	 * @throws UnrecoverableKeyException
-	 * @throws KeyManagementException
-	 */
-	static SSLSocketFactory socketFactory() throws KeyStoreException, CertificateException,
-			NoSuchAlgorithmException, IOException, UnrecoverableKeyException, KeyManagementException {
-		// OpenSSL로 키와 인증서를 만들고, PKCS12 키 저장소에 넣었습니다.
-		KeyStore keyStore = KeyStore.getInstance("PKCS12");
-		// 클라이언트 키와 인증서가 들어있습니다.
-		keyStore.load(HelloMosquitto.class.getResourceAsStream("/clientstore.p12"),
-				"test".toCharArray()); // 키스토어 비번
-		KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-		kmf.init(keyStore, "test1".toCharArray()); // 키 비번
-
-		KeyStore trustKeyStore = KeyStore.getInstance("PKCS12");
-		// CA 인증서가 들어있습니다.
-		trustKeyStore.load(HelloMosquitto.class.getResourceAsStream("/truststore.p12"),
-				"test".toCharArray()); // 키 스토어 비번
-		TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
-		tmf.init(trustKeyStore);
-
-		SSLContext context = SSLContext.getInstance("TLSv1.3");
-		context.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
-		return context.getSocketFactory();
-	}
 
 	/**
 	 * 발행
@@ -152,17 +121,47 @@ public class HelloMosquitto {
 	public static void main(String... args)
 			throws MqttException, CertificateException, UnrecoverableKeyException, NoSuchAlgorithmException,
 			KeyStoreException, KeyManagementException, IOException {
-
-		HelloMosquitto client1 = new HelloMosquitto("Client_1", socketFactory());
+		// TCP connection
+		HelloMosquitto client1 = new HelloMosquitto("Client_1");
 		client1.subscribe("hello/#", 1, new IMqttMessageListener() {
 			@Override
 			public void messageArrived(String topic, MqttMessage message) throws Exception {
 				log.info("Rx: {} = {}", topic, new String(message.getPayload(), StandardCharsets.UTF_8));
 			}
 		});
-		HelloMosquitto client2 = new HelloMosquitto("Client_2");
-		client2.publish(String.join("/", "hello", "mosquitto"), "Hahaha, ...", 1);
+		client1.publish(String.join("/", "hello", "tcp"), "Hi!", 1);
 
+		// TLS connection
+		HelloMosquitto client2 = new HelloMosquitto("Client_2", TlsHelper.socketFactory(
+				HelloMosquitto.class.getResourceAsStream("/clientstore.p12"),
+				"test".toCharArray(),
+				"test1".toCharArray(),
+				HelloMosquitto.class.getResourceAsStream("/truststore.p12"),
+				"test".toCharArray()
+		));
+		client2.publish(String.join("/", "hello", "tls"), "Hahaha, ...", 1);
+
+		// TLS with BC connection
+		HelloMosquitto client3 = new HelloMosquitto("Client_3", TlsHelperWithBouncyCastle.socketFactory(
+				HelloMosquitto.class.getResourceAsStream("/client.pem"),
+				HelloMosquitto.class.getResourceAsStream("/client.key.pem"),
+				"test1".toCharArray(),
+				HelloMosquitto.class.getResourceAsStream("/ca.pem")
+		));
+		client3.publish(String.join("/", "hello", "tls", "bc"), "Oke, ...", 1);
+
+		// TLS with BC connection, without client cert.
+		HelloMosquitto client4 = new HelloMosquitto("Client_4", TlsHelperWithBouncyCastle.socketFactory(
+				HelloMosquitto.class.getResourceAsStream("/ca.pem")
+		));
+		client4.publish(String.join("/", "hello", "tls", "bc-ca-only"), "Oke, ...", 1);
+
+		// // TLS connection, without client key store.
+		HelloMosquitto client5 = new HelloMosquitto("Client_4", TlsHelper.socketFactory(
+				HelloMosquitto.class.getResourceAsStream("/truststore.p12"),
+				"test".toCharArray())
+		);
+		client5.publish(String.join("/", "hello", "tls", "ca-only"), "Mmmm, ...", 1);
 
 		try {
 			Thread.sleep(10000);
@@ -171,5 +170,8 @@ public class HelloMosquitto {
 		}
 		client1.close();
 		client2.close();
+		client3.close();
+		client4.close();
+		client5.close();
 	}
 }
