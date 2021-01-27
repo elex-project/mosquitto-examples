@@ -21,7 +21,7 @@ public final class TlsHelper {
 	}
 
 	/**
-	 * SSL Context를 만든 다음, 소켓 팩토리를 가져옵니다.
+	 * SSL Context
 	 *
 	 * @param keyStoreInputStream   키스토어
 	 * @param keyStorePassword      키스토어 비번
